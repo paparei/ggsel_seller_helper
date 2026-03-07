@@ -39,7 +39,23 @@ class LocaleManager:
                 "prompt_csv_value": "Текущее значение:\n{current}\n\n✏️ Введите значение опции (user_data):\n\nПример: 20р\n\nОтправьте - чтобы очистить",
                 "prompt_csv_user": "Текущее сообщение юзеру:\n{current}\n\n✏️ Введите сообщение для юзера:",
                 "prompt_csv_topic": "Текущее сообщение в топик:\n{current}\n\n✏️ Введите сообщение для топика:",
-                "prompt_csv_name": "Текущее название опции:\n{current}\n\n✏️ Введите новое название:"
+                "prompt_csv_name": "Текущее название опции:\n{current}\n\n✏️ Введите новое название:",
+                "btn_balance": "💰 Мой кошелек",
+                "btn_refresh": "🔄 Обновить",
+                "balance_header": "🏛 **Баланс продавца GGSel**\n" + "—" * 15,
+                "balance_body": "\n💵 **Всего:** `{total} {curr}`\n✅ **Доступно:** `{avail} {curr}`\n⏳ **Удержано:** `{hold} {curr}`\n\nℹ️ *Средства переходят в 'Доступно' после завершения срока холда.*",
+                "balance_error": "❌ **Ошибка:** Не удалось получить данные от GGSel.",
+                "balance_released_alert": (
+                    "📈 **ИЗМЕНЕНИЕ БАЛАНСА**\n"
+                    "🟢 **ПОПОЛНЕНИЕ:** `+{amount} {curr}`\n"
+                    "💰 **Текущий баланс:**\n"
+                    "• Доступно: `{avail} {curr}`\n"
+                    "• Заблокировано: `{hold} {curr}`\n"
+                    "• Лимит: `0.00 {curr}`\n"
+                    "• Всего: `{total} {curr}`\n"
+                    "📊 Предыдущий баланс: `{prev} {curr}`\n"
+                    "🕒 Время проверки: `{time}`"
+                ),
             },
             "en": {
                 "menu_title": "🤖 Bot Control Menu", "btn_auto": "⚙️ Auto-replies", "btn_stats": "📊 Statistics",
@@ -74,7 +90,26 @@ class LocaleManager:
                 "prompt_csv_value": "Current value:\n{current}\n\n✏️ Enter option value (user_data):\n\nExample: 20$\n\nSend - to clear",
                 "prompt_csv_user": "Current user message:\n{current}\n\n✏️ Enter message for the user:",
                 "prompt_csv_topic": "Current topic message:\n{current}\n\n✏️ Enter message for the topic:",
-                "prompt_csv_name": "Current option name:\n{current}\n\n✏️ Enter new name:"
+                "prompt_csv_name": "Current option name:\n{current}\n\n✏️ Enter new name:",
+                "balance_btn": "💰 My Wallet",
+                "refresh_btn": "🔄 Refresh",
+                "balance_header": "🏛 **GGSel Seller Balance**\n" + "—" * 15,
+                "btn_balance": "💰 My Wallet",
+                "btn_refresh": "🔄 Refresh",
+                "balance_header": "🏛 **GGSel Seller Balance**\n" + "—" * 15,
+                "balance_body": "\n💵 **Total:** `{total} {curr}`\n✅ **Available:** `{avail} {curr}`\n⏳ **On Hold:** `{hold} {curr}`\n\nℹ️ *Funds move to 'Available' once the protection period ends.*",
+                "balance_error": "❌ **Error:** Could not connect to GGSel API.",
+                "balance_released_alert": (
+                    "📈 **BALANCE CHANGE**\n"
+                    "🟢 **INCREASE:** `+{amount} {curr}`\n"
+                    "💰 **Current balance:**\n"
+                    "• Available: `{avail} {curr}`\n"
+                    "• Blocked: `{hold} {curr}`\n"
+                    "• Limit: `0.00 {curr}`\n"
+                    "• Total: `{total} {curr}`\n"
+                    "📊 Previous balance: `{prev} {curr}`\n"
+                    "🕒 Verification time: `{time}`"
+                ),
             }
         }
 

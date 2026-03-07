@@ -36,7 +36,7 @@ class TelegramBot:
             )
             
             self.application.add_handler(CommandHandler("menu", self._handle_menu_command))
-            self.application.add_handler(CommandHandler("auto", self._handle_auto_command))
+            #self.application.add_handler(CommandHandler("auto", self._handle_auto_command))
             self.application.add_handler(CommandHandler("history", self._handle_history_command))
             self.application.add_handler(CommandHandler("options", self._handle_options_command))
             self.application.add_handler(CommandHandler("review", self._handle_review_command))
@@ -48,6 +48,14 @@ class TelegramBot:
             
             general_filter = filters.Chat(chat_id=self.group_id) & filters.TEXT & ~filters.IS_TOPIC_MESSAGE & ~filters.COMMAND
             self.application.add_handler(MessageHandler(general_filter, self._handle_general_message))
+            
+            # Check for released funds every 10 minutes
+            if self.application.job_queue:
+                self.application.job_queue.run_repeating(
+                    self.callback_handler.__self__.monitor_balance, 
+                    interval=600, 
+                    first=10
+                )
             
             await self.application.initialize()
             await self.application.start()
@@ -71,16 +79,25 @@ class TelegramBot:
     def set_review_handler(self, handler: Callable): self.review_handler = handler
     
     async def _handle_menu_command(self, update: Update, context):
-        """Main Menu with translations"""
+        """Main Menu - Works for both /menu and Back buttons"""
+        # Ensure we only respond in your specific group
         if update.effective_chat.id != self.group_id: return
         
         keyboard = [
             [InlineKeyboardButton(_("btn_auto"), callback_data="auto_menu")],
+            [InlineKeyboardButton(_("btn_balance"), callback_data="check_balance")],
             [InlineKeyboardButton(_("btn_stats"), callback_data="stats")],
             [InlineKeyboardButton(_("btn_lang"), callback_data="lang_toggle")],
             [InlineKeyboardButton(_("btn_close"), callback_data="close")]
         ]
-        await update.message.reply_text(_("menu_title"), reply_markup=InlineKeyboardMarkup(keyboard))
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        # If triggered by a button (Callback), edit the existing message
+        if update.callback_query:
+            await update.callback_query.edit_message_text(_("menu_title"), reply_markup=reply_markup)
+        # If triggered by /menu command, send a new message
+        else:
+            await update.message.reply_text(_("menu_title"), reply_markup=reply_markup)
     
     async def _handle_auto_command(self, update: Update, context):
         if update.effective_chat.id != self.group_id: return

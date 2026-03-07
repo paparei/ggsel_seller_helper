@@ -2,6 +2,8 @@ import asyncio
 import json
 import os
 import logging
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import ContextTypes
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
@@ -25,6 +27,7 @@ class BotService:
         self.database = Database(config.database_path)
         self.ggsel_api = GGSelAPI(config)
         self.telegram_bot = TelegramBot(config)
+        self.last_available_balance = 0.0 # Track release alerts
         # Используем абсолютный путь для topics.json
         topics_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "topics.json")
         self.topic_manager = TopicManager(topics_file)
@@ -49,6 +52,18 @@ class BotService:
         
         self._load_pending_topics()
         self._load_processed_reviews()
+        
+    def get_main_menu_markup(self):
+        """Generates the full main menu keyboard"""
+        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+        keyboard = [
+            [InlineKeyboardButton(_("btn_auto"), callback_data="auto_menu")],
+            [InlineKeyboardButton(_("btn_balance"), callback_data="check_balance")],
+            [InlineKeyboardButton(_("btn_stats"), callback_data="stats")],
+            [InlineKeyboardButton(_("btn_lang"), callback_data="lang_toggle")],
+            [InlineKeyboardButton(_("btn_close"), callback_data="close")]
+        ]
+        return InlineKeyboardMarkup(keyboard)
     
     def _load_processed_reviews(self):
         """Загрузка обработанных отзывов из файла"""
@@ -851,6 +866,11 @@ class BotService:
         
         if data == "auto_menu":
             await self.show_auto_menu(chat_id, message_id)
+            
+        elif data == "check_balance":
+            await self.show_balance(update, context)
+        elif data == "main_menu":
+            await self.telegram_bot._handle_menu_command(update, context)
         
         elif data == "auto_toggle":
             self.autoresponder.toggle_enabled()
@@ -2053,3 +2073,131 @@ class BotService:
         except Exception as e:
             logging.error(f"Ошибка команды /review: {e}")
             await self.telegram_bot.send_message(f"❌ Ошибка: {e}", topic_id)
+
+    def get_balance_markup(self):
+        keyboard = [
+            [InlineKeyboardButton(_("refresh_btn"), callback_data="check_balance")],
+            [InlineKeyboardButton(_("back_btn"), callback_data="main_menu")]
+        ]
+        return InlineKeyboardMarkup(keyboard)
+
+    async def show_balance(self, update, context):
+        """Displays wallet UI using mapped GGSel variables"""
+        query = update.callback_query
+        await query.answer()
+
+        try:
+            import json
+            import urllib.request
+            from ggsel_api import GGSelAPI
+            
+            # Fetch token
+            api = GGSelAPI(self.config)
+            if not api.login():
+                raise Exception("Failed to generate token via apilogin.")
+            
+            base_url = getattr(self.config, 'ggsel_base_url', 'https://seller.ggsel.net/api_sellers/api').rstrip('/')
+            endpoint = f"{base_url}/sellers/account/balance/info?token={api.token}"
+            
+            req = urllib.request.Request(endpoint)
+            req.add_header('Accept', 'application/json')
+            req.add_header('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)')
+            
+            with urllib.request.urlopen(req, timeout=15) as response:
+                raw_data = response.read().decode('utf-8')
+                
+            data = json.loads(raw_data)
+            content = data.get("content", {})
+            
+            # Map the exact keys from the raw GGSel API response
+            # Using 'or 0.0' prevents crashes when GGSel sends 'null'
+            avail = float(content.get("amount_t_free") or 0.0)
+            hold = float(content.get("amount_t_lock") or 0.0)
+            
+            # Calculate total manually since GGSel doesn't explicitly provide it
+            total = avail + hold
+            curr = "USD"
+            
+            # Format numbers to always show 2 decimal places (e.g., 5.17)
+            text = f"{_('balance_header')}{_('balance_body').format(total=f'{total:.2f}', avail=f'{avail:.2f}', hold=f'{hold:.2f}', curr=curr)}"
+            
+            from telegram import InlineKeyboardButton
+            keyboard = [
+                [InlineKeyboardButton(_("btn_refresh"), callback_data="check_balance")],
+                [InlineKeyboardButton(_("btn_back"), callback_data="main_menu")]
+            ]
+            await self.telegram_bot.edit_message(query.message.message_id, query.message.chat.id, text, keyboard)
+
+        except Exception as e:
+            import logging
+            logging.error(f"Balance API Error: {e}")
+            error_text = _("balance_error") + f"\n\nDetails: {str(e)[:150]}"
+            await self.telegram_bot.edit_message(
+                query.message.message_id, 
+                query.message.chat.id, 
+                error_text, 
+                self.get_main_menu_markup().inline_keyboard
+            )
+
+    async def monitor_balance(self, context):
+        """Background task for release alerts using mapped variables and detailed UI"""
+        try:
+            import json
+            import urllib.request
+            from datetime import datetime
+            from ggsel_api import GGSelAPI
+            
+            api = GGSelAPI(self.config)
+            if not api.login():
+                return
+            
+            base_url = getattr(self.config, 'ggsel_base_url', 'https://seller.ggsel.net/api_sellers/api').rstrip('/')
+            endpoint = f"{base_url}/sellers/account/balance/info?token={api.token}"
+            
+            req = urllib.request.Request(endpoint)
+            req.add_header('Accept', 'application/json')
+            req.add_header('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)')
+            
+            with urllib.request.urlopen(req, timeout=15) as response:
+                raw_data = response.read().decode('utf-8')
+                
+            data = json.loads(raw_data)
+            content = data.get("content", {})
+            
+            # Extract all necessary balances
+            current_avail = float(content.get("amount_t_free") or 0.0)
+            current_hold = float(content.get("amount_t_lock") or 0.0)
+            current_total = current_avail + current_hold
+            
+            # Bạn có thể đổi thành "USDT" ở đây nếu muốn giống y hệt ảnh
+            currency = "USD" 
+            
+            # Chỉ gửi thông báo nếu số dư khả dụng tăng lên (tiền được release từ hold)
+            if self.last_available_balance > 0 and current_avail > self.last_available_balance:
+                released = current_avail - self.last_available_balance
+                
+                # Format thời gian: DD/MM/YYYY HH:MM:SS AM/PM
+                current_time = datetime.now().strftime("%d/%m/%Y %I:%M:%S %p")
+                
+                alert = _("balance_released_alert").format(
+                    amount=f"{released:.2f}", 
+                    curr=currency, 
+                    avail=f"{current_avail:.2f}",
+                    hold=f"{current_hold:.2f}",
+                    total=f"{current_total:.2f}",
+                    prev=f"{self.last_available_balance:.2f}",
+                    time=current_time
+                )
+                
+                await context.bot.send_message(
+                    chat_id=self.config.telegram_group_id, 
+                    text=alert, 
+                    parse_mode="Markdown"
+                )
+            
+            # Cập nhật số dư cuối cùng để dùng cho lần check tiếp theo (10 phút sau)
+            self.last_available_balance = current_avail
+            
+        except Exception as e:
+            import logging
+            logging.debug(f"Monitor Balance Error: {e}")
