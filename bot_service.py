@@ -1145,7 +1145,7 @@ class BotService:
             [InlineKeyboardButton(f"{_('btn_triggers')} ({triggers_count})", callback_data="auto_triggers")],
             [InlineKeyboardButton(f"{_('btn_reviews')} {'✅' if review_enabled else '❌'}", callback_data="auto_reviews")],
             [InlineKeyboardButton(f"{_('btn_csv')} {'✅' if csv_enabled else '❌'}", callback_data="csv_menu")],
-            [InlineKeyboardButton(_("btn_back"), callback_data="menu")]
+            [InlineKeyboardButton(_("btn_back"), callback_data="main_menu")]
         ]
         await self.telegram_bot.edit_message(message_id, chat_id, text, keyboard)
 
@@ -1171,7 +1171,7 @@ class BotService:
             [InlineKeyboardButton(f"{_('btn_triggers')} ({triggers_count})", callback_data="auto_triggers")],
             [InlineKeyboardButton(f"{_('btn_reviews')} {'✅' if review_enabled else '❌'}", callback_data="auto_reviews")],
             [InlineKeyboardButton(f"{_('btn_csv')} {'✅' if csv_enabled else '❌'}", callback_data="csv_menu")],
-            [InlineKeyboardButton(_("btn_back"), callback_data="menu")]
+            [InlineKeyboardButton(_("btn_back"), callback_data="main_menu")]
         ]
         await self.telegram_bot.send_message_with_keyboard(text, keyboard, None)
          
