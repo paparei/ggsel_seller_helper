@@ -13,6 +13,7 @@ from telegram_bot import TelegramBot
 from topic_manager import TopicManager
 from message_manager import MessageManager
 from purchase_manager import PurchaseManager, Purchase
+from locales import locales, _
 from autoresponder import AutoResponder
 
 # Глобальный пул потоков для параллельных HTTP запросов
@@ -839,7 +840,6 @@ class BotService:
         """Обработка inline кнопок"""
         query = update.callback_query
         
-        # Для команды /auto - отправляем новое сообщение (query будет None)
         if data == "auto_menu_new":
             chat_id = update.effective_chat.id
             await self.send_auto_menu_new(chat_id)
@@ -849,123 +849,106 @@ class BotService:
         chat_id = message.chat.id
         message_id = message.message_id
         
-        # Меню автоответов
         if data == "auto_menu":
             await self.show_auto_menu(chat_id, message_id)
         
-        # Переключить автоответы
         elif data == "auto_toggle":
-            enabled = self.autoresponder.toggle_enabled()
+            self.autoresponder.toggle_enabled()
             await self.show_auto_menu(chat_id, message_id)
         
-        # Переключить приветствие
         elif data == "auto_first_toggle":
             self.autoresponder.toggle_first_message()
             await self.show_auto_menu(chat_id, message_id)
         
-        # Изменить текст приветствия
         elif data == "auto_first_edit":
             self.awaiting_input[chat_id] = {"type": "first_message"}
             await self.telegram_bot.edit_message(
                 message_id, chat_id,
-                "✏️ Отправьте новый текст приветствия:",
-                [[InlineKeyboardButton("❌ Отмена", callback_data="auto_menu")]]
+                _("prompt_greeting"),
+                [[InlineKeyboardButton(_("btn_cancel"), callback_data="auto_menu")]]
             )
         
-        # Изменить текст уведомления (удалено - теперь для каждого триггера отдельно)
-        
-        # Список триггеров
         elif data == "auto_triggers":
             await self.show_triggers_menu(chat_id, message_id)
         
-        # Добавить триггер
         elif data == "auto_add_trigger":
             self.awaiting_input[chat_id] = {"type": "trigger_phrase"}
             await self.telegram_bot.edit_message(
                 message_id, chat_id,
-                "✏️ Отправьте фразу-триггер (на что реагировать):",
-                [[InlineKeyboardButton("❌ Отмена", callback_data="auto_triggers")]]
+                _("prompt_trigger_phrase"),
+                [[InlineKeyboardButton(_("btn_cancel"), callback_data="auto_triggers")]]
             )
         
-        # Добавить триггер с уведомлением
         elif data == "auto_add_trigger_notify":
             self.awaiting_input[chat_id] = {"type": "trigger_phrase", "notify_group": True}
             await self.telegram_bot.edit_message(
                 message_id, chat_id,
-                "✏️ Отправьте фразу-триггер (с уведомлением):",
-                [[InlineKeyboardButton("❌ Отмена", callback_data="auto_triggers")]]
+                _("prompt_trigger_notify"),
+                [[InlineKeyboardButton(_("btn_cancel"), callback_data="auto_triggers")]]
             )
         
-        # Редактировать триггер
         elif data.startswith("auto_trigger_edit_"):
             idx = self._safe_parse_idx(data, "auto_trigger_edit_")
             if idx >= 0:
                 await self.show_trigger_edit_menu(chat_id, message_id, idx)
         
-        # Переключить уведомление триггера
         elif data.startswith("auto_trigger_notify_"):
             idx = self._safe_parse_idx(data, "auto_trigger_notify_")
             if idx >= 0:
                 self.autoresponder.toggle_trigger_notify(idx)
                 await self.show_trigger_edit_menu(chat_id, message_id, idx)
         
-        # Переключить точное совпадение триггера
         elif data.startswith("auto_trigger_exact_"):
             idx = self._safe_parse_idx(data, "auto_trigger_exact_")
             if idx >= 0:
                 self.autoresponder.toggle_trigger_exact_match(idx)
                 await self.show_trigger_edit_menu(chat_id, message_id, idx)
         
-        # Переключить триггер
         elif data.startswith("auto_trigger_toggle_"):
             idx = self._safe_parse_idx(data, "auto_trigger_toggle_")
             if idx >= 0:
                 self.autoresponder.toggle_trigger(idx)
                 await self.show_trigger_edit_menu(chat_id, message_id, idx)
         
-        # Изменить фразу триггера
         elif data.startswith("auto_trigger_phrase_"):
             idx = self._safe_parse_idx(data, "auto_trigger_phrase_")
             if idx >= 0:
                 self.awaiting_input[chat_id] = {"type": "edit_trigger_phrase", "trigger_idx": idx}
                 await self.telegram_bot.edit_message(
                     message_id, chat_id,
-                    "✏️ Отправьте новую фразу-триггер:",
-                    [[InlineKeyboardButton("❌ Отмена", callback_data=f"auto_trigger_edit_{idx}")]]
+                    _("prompt_edit_phrase"),
+                    [[InlineKeyboardButton(_("btn_cancel"), callback_data=f"auto_trigger_edit_{idx}")]]
                 )
         
-        # Изменить ответ триггера
         elif data.startswith("auto_trigger_response_"):
             idx = self._safe_parse_idx(data, "auto_trigger_response_")
             if idx >= 0:
                 self.awaiting_input[chat_id] = {"type": "edit_trigger_response", "trigger_idx": idx}
                 await self.telegram_bot.edit_message(
                     message_id, chat_id,
-                    "✏️ Отправьте новый текст ответа:",
-                    [[InlineKeyboardButton("❌ Отмена", callback_data=f"auto_trigger_edit_{idx}")]]
+                    _("prompt_edit_answer"),
+                    [[InlineKeyboardButton(_("btn_cancel"), callback_data=f"auto_trigger_edit_{idx}")]]
                 )
         
-        # Изменить текст уведомления триггера
         elif data.startswith("auto_trigger_notifytext_"):
             idx = self._safe_parse_idx(data, "auto_trigger_notifytext_")
             if idx >= 0:
                 self.awaiting_input[chat_id] = {"type": "edit_trigger_notify_text", "trigger_idx": idx}
                 trigger = self.autoresponder.get_trigger(idx)
-                current = trigger.get('notify_text', '🔔 Требуется ответ!') if trigger else ''
+                current = trigger.get('notify_text', '') if trigger else ''
+                text_prompt = _("prompt_notify_text").replace("{current}", current or "(не задан)")
                 await self.telegram_bot.edit_message(
                     message_id, chat_id,
-                    f"Текущий текст уведомления:\n{current or '(не задан)'}\n\n✏️ Отправьте новый текст:",
-                    [[InlineKeyboardButton("❌ Отмена", callback_data=f"auto_trigger_edit_{idx}")]]
+                    text_prompt,
+                    [[InlineKeyboardButton(_("btn_cancel"), callback_data=f"auto_trigger_edit_{idx}")]]
                 )
         
-        # Удалить триггер
         elif data.startswith("auto_trigger_del_"):
             idx = self._safe_parse_idx(data, "auto_trigger_del_")
             if idx >= 0:
                 self.autoresponder.remove_trigger(idx)
                 await self.show_triggers_menu(chat_id, message_id)
         
-        # === Меню ответов на отзывы ===
         elif data == "auto_reviews":
             await self.show_reviews_menu(chat_id, message_id)
         
@@ -984,36 +967,34 @@ class BotService:
         elif data == "auto_reviews_good_edit":
             self.awaiting_input[chat_id] = {"type": "edit_good_review_text"}
             current = self.autoresponder.get_good_review_text()
+            text_prompt = _("prompt_good_review").replace("{current}", current)
             await self.telegram_bot.edit_message(
                 message_id, chat_id,
-                f"Текущий текст:\n{current}\n\n✏️ Отправьте новый текст ответа на хороший отзыв:",
-                [[InlineKeyboardButton("❌ Отмена", callback_data="auto_reviews")]]
+                text_prompt,
+                [[InlineKeyboardButton(_("btn_cancel"), callback_data="auto_reviews")]]
             )
         
         elif data == "auto_reviews_bad_edit":
             self.awaiting_input[chat_id] = {"type": "edit_bad_review_text"}
             current = self.autoresponder.get_bad_review_text()
+            text_prompt = _("prompt_bad_review").replace("{current}", current)
             await self.telegram_bot.edit_message(
                 message_id, chat_id,
-                f"Текущий текст:\n{current}\n\n✏️ Отправьте новый текст ответа на плохой отзыв:",
-                [[InlineKeyboardButton("❌ Отмена", callback_data="auto_reviews")]]
+                text_prompt,
+                [[InlineKeyboardButton(_("btn_cancel"), callback_data="auto_reviews")]]
             )
         
-        # Статистика
         elif data == "stats":
             topics = self.topic_manager.get_all_topics()
             purchases = len([k for k in topics if k.startswith('purchase_')])
-            
-            text = f"📊 Статистика\n\n"
-            text += f"📝 Топиков: {len(topics)}\n"
-            text += f"🛒 Покупок: {purchases}\n"
-            text += f"💬 Сообщений: {len(self.message_manager.processed_messages)}\n"
-            text += f"🤖 Автоответы: {'✅' if self.autoresponder.is_enabled() else '❌'}"
-            
-            keyboard = [[InlineKeyboardButton("◀️ Назад", callback_data="auto_menu")]]
+            text = f"{_('stats_title')}\n\n"
+            text += f"{_('stats_topics')} {len(topics)}\n"
+            text += f"{_('stats_purchases')} {purchases}\n"
+            text += f"{_('stats_msgs')} {len(self.message_manager.processed_messages)}\n"
+            text += f"{_('stats_auto')} {'✅' if self.autoresponder.is_enabled() else '❌'}"
+            keyboard = [[InlineKeyboardButton(_("btn_back"), callback_data="auto_menu")]]
             await self.telegram_bot.edit_message(message_id, chat_id, text, keyboard)
         
-        # === Меню режима ЧСВ ===
         elif data == "csv_menu":
             await self.show_csv_menu(chat_id, message_id)
         
@@ -1025,8 +1006,8 @@ class BotService:
             self.awaiting_input[chat_id] = {"type": "csv_option_name"}
             await self.telegram_bot.edit_message(
                 message_id, chat_id,
-                "✏️ Введите название опции (как в заказе):\n\nПример: Чай",
-                [[InlineKeyboardButton("❌ Отмена", callback_data="csv_menu")]]
+                _("prompt_csv_option"),
+                [[InlineKeyboardButton(_("btn_cancel"), callback_data="csv_menu")]]
             )
         
         elif data.startswith("csv_rule_"):
@@ -1058,10 +1039,11 @@ class BotService:
                 self.awaiting_input[chat_id] = {"type": "csv_option_value", "rule_idx": idx}
                 rule = self.autoresponder.get_csv_rule(idx)
                 current = rule.get("option_value", "") if rule else ""
+                text_prompt = _("prompt_csv_value").replace("{current}", current or "(любое)")
                 await self.telegram_bot.edit_message(
                     message_id, chat_id,
-                    f"Текущее значение:\n{current or '(любое)'}\n\n✏️ Введите значение опции (user_data):\n\nПример: 20р\n\nОтправьте - чтобы очистить",
-                    [[InlineKeyboardButton("❌ Отмена", callback_data=f"csv_rule_{idx}")]]
+                    text_prompt,
+                    [[InlineKeyboardButton(_("btn_cancel"), callback_data=f"csv_rule_{idx}")]]
                 )
         
         elif data.startswith("csv_touser_"):
@@ -1082,10 +1064,11 @@ class BotService:
                 self.awaiting_input[chat_id] = {"type": "csv_user_message", "rule_idx": idx}
                 rule = self.autoresponder.get_csv_rule(idx)
                 current = rule.get("user_message", "") if rule else ""
+                text_prompt = _("prompt_csv_user").replace("{current}", current or "(не задано)")
                 await self.telegram_bot.edit_message(
                     message_id, chat_id,
-                    f"Текущее сообщение юзеру:\n{current or '(не задано)'}\n\n✏️ Введите сообщение для юзера:",
-                    [[InlineKeyboardButton("❌ Отмена", callback_data=f"csv_rule_{idx}")]]
+                    text_prompt,
+                    [[InlineKeyboardButton(_("btn_cancel"), callback_data=f"csv_rule_{idx}")]]
                 )
         
         elif data.startswith("csv_topicmsg_"):
@@ -1094,10 +1077,11 @@ class BotService:
                 self.awaiting_input[chat_id] = {"type": "csv_topic_message", "rule_idx": idx}
                 rule = self.autoresponder.get_csv_rule(idx)
                 current = rule.get("topic_message", "") if rule else ""
+                text_prompt = _("prompt_csv_topic").replace("{current}", current or "(не задано)")
                 await self.telegram_bot.edit_message(
                     message_id, chat_id,
-                    f"Текущее сообщение в топик:\n{current or '(не задано)'}\n\n✏️ Введите сообщение для топика:",
-                    [[InlineKeyboardButton("❌ Отмена", callback_data=f"csv_rule_{idx}")]]
+                    text_prompt,
+                    [[InlineKeyboardButton(_("btn_cancel"), callback_data=f"csv_rule_{idx}")]]
                 )
         
         elif data.startswith("csv_name_"):
@@ -1106,10 +1090,11 @@ class BotService:
                 self.awaiting_input[chat_id] = {"type": "csv_edit_name", "rule_idx": idx}
                 rule = self.autoresponder.get_csv_rule(idx)
                 current = rule.get("option_name", "") if rule else ""
+                text_prompt = _("prompt_csv_name").replace("{current}", current)
                 await self.telegram_bot.edit_message(
                     message_id, chat_id,
-                    f"Текущее название опции:\n{current}\n\n✏️ Введите новое название:",
-                    [[InlineKeyboardButton("❌ Отмена", callback_data=f"csv_rule_{idx}")]]
+                    text_prompt,
+                    [[InlineKeyboardButton(_("btn_cancel"), callback_data=f"csv_rule_{idx}")]]
                 )
         
         elif data.startswith("csv_del_"):
@@ -1119,111 +1104,83 @@ class BotService:
                 await self.show_csv_menu(chat_id, message_id)
     
     async def show_auto_menu(self, chat_id: int, message_id: int):
-        """Показать меню автоответов"""
+        """Показать меню автоответов (Translated)"""
         enabled = self.autoresponder.is_enabled()
         first_enabled = self.autoresponder.is_first_message_enabled()
         triggers_count = len(self.autoresponder.get_triggers())
         review_enabled = self.autoresponder.is_review_responses_enabled()
         csv_enabled = self.autoresponder.is_csv_mode_enabled()
-        csv_rules_count = len(self.autoresponder.get_csv_rules())
         
-        text = f"⚙️ Настройки автоответов\n\n"
-        text += f"Статус: {'✅ Включено' if enabled else '❌ Выключено'}\n"
-        text += f"Приветствие: {'✅' if first_enabled else '❌'}\n"
-        text += f"Триггеров: {triggers_count}\n"
-        text += f"Ответы на отзывы: {'✅' if review_enabled else '❌'}\n"
-        text += f"Режим ЧСВ: {'✅' if csv_enabled else '❌'} ({csv_rules_count})"
+        text = f"{_('auto_title')}\n\n"
+        text += f"{_('auto_status')} {_('enabled') if enabled else _('disabled')}\n"
+        text += f"{_('auto_greeting')} {'✅' if first_enabled else '❌'}\n"
+        text += f"{_('auto_triggers')} {triggers_count}\n"
+        text += f"{_('auto_reviews')} {'✅' if review_enabled else '❌'}\n"
+        text += f"{_('auto_csv')} {'✅' if csv_enabled else '❌'} ({len(self.autoresponder.get_csv_rules())})"
         
         keyboard = [
-            [InlineKeyboardButton(
-                f"{'🔴 Выключить' if enabled else '🟢 Включить'}", 
-                callback_data="auto_toggle"
-            )],
-            [InlineKeyboardButton(
-                f"👋 Приветствие {'✅' if first_enabled else '❌'}", 
-                callback_data="auto_first_toggle"
-            )],
-            [InlineKeyboardButton("✏️ Текст приветствия", callback_data="auto_first_edit")],
-            [InlineKeyboardButton(f"📝 Триггеры ({triggers_count})", callback_data="auto_triggers")],
-            [InlineKeyboardButton(f"⭐ Ответы на отзывы {'✅' if review_enabled else '❌'}", callback_data="auto_reviews")],
-            [InlineKeyboardButton(f"🎯 Режим ЧСВ {'✅' if csv_enabled else '❌'} ({csv_rules_count})", callback_data="csv_menu")],
-            [InlineKeyboardButton("📊 Статистика", callback_data="stats")],
-            [InlineKeyboardButton("❌ Закрыть", callback_data="close")]
+            [InlineKeyboardButton(f"{_('btn_turn_off') if enabled else _('btn_turn_on')}", callback_data="auto_toggle")],
+            [InlineKeyboardButton(f"{_('btn_greeting')} {'✅' if first_enabled else '❌'}", callback_data="auto_first_toggle")],
+            [InlineKeyboardButton(_("btn_greeting_text"), callback_data="auto_first_edit")],
+            [InlineKeyboardButton(f"{_('btn_triggers')} ({triggers_count})", callback_data="auto_triggers")],
+            [InlineKeyboardButton(f"{_('btn_reviews')} {'✅' if review_enabled else '❌'}", callback_data="auto_reviews")],
+            [InlineKeyboardButton(f"{_('btn_csv')} {'✅' if csv_enabled else '❌'}", callback_data="csv_menu")],
+            [InlineKeyboardButton(_("btn_back"), callback_data="menu")]
         ]
-        
         await self.telegram_bot.edit_message(message_id, chat_id, text, keyboard)
-    
+
     async def send_auto_menu_new(self, chat_id: int):
-        """Отправить новое сообщение с меню автоответов (для команды /auto)"""
+        """Отправить новое сообщение с меню автоответов (Translated)"""
         enabled = self.autoresponder.is_enabled()
         first_enabled = self.autoresponder.is_first_message_enabled()
         triggers_count = len(self.autoresponder.get_triggers())
         review_enabled = self.autoresponder.is_review_responses_enabled()
         csv_enabled = self.autoresponder.is_csv_mode_enabled()
-        csv_rules_count = len(self.autoresponder.get_csv_rules())
         
-        text = f"⚙️ Настройки автоответов\n\n"
-        text += f"Статус: {'✅ Включено' if enabled else '❌ Выключено'}\n"
-        text += f"Приветствие: {'✅' if first_enabled else '❌'}\n"
-        text += f"Триггеров: {triggers_count}\n"
-        text += f"Ответы на отзывы: {'✅' if review_enabled else '❌'}\n"
-        text += f"Режим ЧСВ: {'✅' if csv_enabled else '❌'} ({csv_rules_count})"
+        text = f"{_('auto_title')}\n\n"
+        text += f"{_('auto_status')} {_('enabled') if enabled else _('disabled')}\n"
+        text += f"{_('auto_greeting')} {'✅' if first_enabled else '❌'}\n"
+        text += f"{_('auto_triggers')} {triggers_count}\n"
+        text += f"{_('auto_reviews')} {'✅' if review_enabled else '❌'}\n"
+        text += f"{_('auto_csv')} {'✅' if csv_enabled else '❌'} ({len(self.autoresponder.get_csv_rules())})"
         
         keyboard = [
-            [InlineKeyboardButton(
-                f"{'🔴 Выключить' if enabled else '🟢 Включить'}", 
-                callback_data="auto_toggle"
-            )],
-            [InlineKeyboardButton(
-                f"👋 Приветствие {'✅' if first_enabled else '❌'}", 
-                callback_data="auto_first_toggle"
-            )],
-            [InlineKeyboardButton("✏️ Текст приветствия", callback_data="auto_first_edit")],
-            [InlineKeyboardButton(f"📝 Триггеры ({triggers_count})", callback_data="auto_triggers")],
-            [InlineKeyboardButton(f"⭐ Ответы на отзывы {'✅' if review_enabled else '❌'}", callback_data="auto_reviews")],
-            [InlineKeyboardButton(f"🎯 Режим ЧСВ {'✅' if csv_enabled else '❌'} ({csv_rules_count})", callback_data="csv_menu")],
-            [InlineKeyboardButton("📊 Статистика", callback_data="stats")],
-            [InlineKeyboardButton("❌ Закрыть", callback_data="close")]
+            [InlineKeyboardButton(f"{_('btn_turn_off') if enabled else _('btn_turn_on')}", callback_data="auto_toggle")],
+            [InlineKeyboardButton(f"{_('btn_greeting')} {'✅' if first_enabled else '❌'}", callback_data="auto_first_toggle")],
+            [InlineKeyboardButton(_("btn_greeting_text"), callback_data="auto_first_edit")],
+            [InlineKeyboardButton(f"{_('btn_triggers')} ({triggers_count})", callback_data="auto_triggers")],
+            [InlineKeyboardButton(f"{_('btn_reviews')} {'✅' if review_enabled else '❌'}", callback_data="auto_reviews")],
+            [InlineKeyboardButton(f"{_('btn_csv')} {'✅' if csv_enabled else '❌'}", callback_data="csv_menu")],
+            [InlineKeyboardButton(_("btn_back"), callback_data="menu")]
         ]
-        
         await self.telegram_bot.send_message_with_keyboard(text, keyboard, None)
-    
+         
     async def show_csv_menu(self, chat_id: int, message_id: int):
         """Показать меню режима ЧСВ."""
         enabled = self.autoresponder.is_csv_mode_enabled()
         rules = self.autoresponder.get_csv_rules()
         
-        text = "🎯 Режим ЧСВ\n\n"
-        text += f"Статус: {'✅ Включено' if enabled else '❌ Выключено'}\n\n"
-        text += "Реагирует на опции в заказе.\n"
-        text += "Переменные: {option}, {value}, {sum}\n\n"
+        text = f"{_('csv_title')}\n\n"
+        text += f"{_('auto_status')} ✅ {_('enabled') if enabled else '❌ ' + _('disabled')}\n\n"
+        text += f"{_('csv_desc')}\n\n"
         
         if rules:
-            text += f"📋 Правила ({len(rules)}):\n"
+            text += f"📋 Rules ({len(rules)}):\n"
             for i, rule in enumerate(rules):
                 status = "✅" if rule.get("enabled", True) else "❌"
                 name = rule.get("option_name", "")[:15]
                 value = rule.get("option_value", "")
                 match_type = rule.get("match_type", "name")
-                
-                # Иконки типа сопоставления
                 type_icon = {"name": "📝", "value": "🎯", "contains": "🔍"}.get(match_type, "📝")
-                
-                # Показываем значение если есть
                 value_str = f"={value[:10]}" if value and match_type != "name" else ""
-                
                 to_user = "👤" if rule.get("send_to_user", False) else ""
                 to_topic = "💬" if rule.get("send_to_topic", True) else ""
-                
                 text += f"{i+1}. {status} {type_icon} {name}{value_str} {to_user}{to_topic}\n"
         else:
-            text += "Правил нет. Добавьте первое!"
+            text += _('csv_rules_empty')
         
         keyboard = [
-            [InlineKeyboardButton(
-                f"{'🔴 Выключить' if enabled else '🟢 Включить'}", 
-                callback_data="csv_toggle"
-            )],
+            [InlineKeyboardButton(f"{_('btn_turn_off') if enabled else _('btn_turn_on')}", callback_data="csv_toggle")],
         ]
         
         for i, rule in enumerate(rules):
@@ -1231,11 +1188,11 @@ class BotService:
             name = rule.get("option_name", "")[:12]
             keyboard.append([
                 InlineKeyboardButton(f"{status} {name}", callback_data=f"csv_rule_{i}"),
-                InlineKeyboardButton("🗑", callback_data=f"csv_del_{i}")
+                InlineKeyboardButton(_("btn_delete"), callback_data=f"csv_del_{i}")
             ])
         
-        keyboard.append([InlineKeyboardButton("➕ Добавить правило", callback_data="csv_add_rule")])
-        keyboard.append([InlineKeyboardButton("◀️ Назад", callback_data="auto_menu")])
+        keyboard.append([InlineKeyboardButton(_("btn_add_rule"), callback_data="csv_add_rule")])
+        keyboard.append([InlineKeyboardButton(_("btn_back"), callback_data="auto_menu")])
         
         await self.telegram_bot.edit_message(message_id, chat_id, text, keyboard)
     
@@ -1256,91 +1213,70 @@ class BotService:
         send_to_topic = rule.get("send_to_topic", True)
         topic_message = rule.get("topic_message", "")
         
-        # Описание типа сопоставления
         match_desc = {
-            "name": "📝 Только по названию",
-            "value": "🎯 По названию и значению",
-            "contains": "🔍 Значение содержит"
-        }.get(match_type, "📝 Только по названию")
+            "name": _('csv_type_name'),
+            "value": _('csv_type_value'),
+            "contains": _('csv_type_contains')
+        }.get(match_type, _('csv_type_name'))
         
-        text = f"🎯 Правило ЧСВ #{idx+1}\n\n"
-        text += f"📝 Опция: {option_name}\n"
+        text = f"{_('csv_rule_title')} #{idx+1}\n\n"
+        text += f"{_('csv_option')} {option_name}\n"
         if option_value:
-            text += f"📊 Значение: {option_value}\n"
-        text += f"🔎 Тип: {match_desc}\n"
-        text += f"Статус: {'✅ Вкл' if enabled else '❌ Выкл'}\n"
-        text += f"🔤 Регистр: {'Строго' if case_sensitive else 'Любой'}\n\n"
+            text += f"{_('csv_value')} {option_value}\n"
+        text += f"{_('csv_type')} {match_desc}\n"
+        text += f"{_('auto_status')} {'✅' if enabled else '❌'}\n"
+        text += f"{_('csv_register')} {_('csv_reg_strict') if case_sensitive else _('csv_reg_any')}\n\n"
         
-        text += f"👤 Юзеру: {'✅' if send_to_user else '❌'}\n"
+        text += f"{_('csv_to_user')} {'✅' if send_to_user else '❌'}\n"
         if send_to_user and user_message:
             text += f"   └ {user_message[:50]}{'...' if len(user_message) > 50 else ''}\n"
-        text += f"💬 В топик: {'✅' if send_to_topic else '❌'}\n"
+        text += f"{_('csv_to_topic')} {'✅' if send_to_topic else '❌'}\n"
         if send_to_topic and topic_message:
             text += f"   └ {topic_message[:50]}{'...' if len(topic_message) > 50 else ''}\n"
         
         keyboard = [
-            [InlineKeyboardButton(
-                f"{'🔴 Выключить' if enabled else '🟢 Включить'}", 
-                callback_data=f"csv_toggle_{idx}"
-            )],
-            [InlineKeyboardButton("✏️ Название опции", callback_data=f"csv_name_{idx}")],
-            [InlineKeyboardButton("✏️ Значение опции", callback_data=f"csv_value_{idx}")],
+            [InlineKeyboardButton(f"{_('btn_turn_off') if enabled else _('btn_turn_on')}", callback_data=f"csv_toggle_{idx}")],
+            [InlineKeyboardButton(_("btn_edit_name"), callback_data=f"csv_name_{idx}")],
+            [InlineKeyboardButton(_("btn_edit_value"), callback_data=f"csv_value_{idx}")],
             [InlineKeyboardButton(f"🔎 {match_desc}", callback_data=f"csv_matchtype_{idx}")],
-            [InlineKeyboardButton(
-                f"🔤 Регистр: {'Строго' if case_sensitive else 'Любой'}", 
-                callback_data=f"csv_case_{idx}"
-            )],
-            [InlineKeyboardButton(
-                f"👤 Юзеру: {'✅' if send_to_user else '❌'}", 
-                callback_data=f"csv_touser_{idx}"
-            )],
+            [InlineKeyboardButton(f"{_('csv_register')} {_('csv_reg_strict') if case_sensitive else _('csv_reg_any')}", callback_data=f"csv_case_{idx}")],
+            [InlineKeyboardButton(f"{_('csv_to_user')} {'✅' if send_to_user else '❌'}", callback_data=f"csv_touser_{idx}")],
         ]
         
         if send_to_user:
-            keyboard.append([InlineKeyboardButton("✏️ Сообщение юзеру", callback_data=f"csv_usermsg_{idx}")])
+            keyboard.append([InlineKeyboardButton(_("btn_edit_user_msg"), callback_data=f"csv_usermsg_{idx}")])
         
-        keyboard.append([InlineKeyboardButton(
-            f"💬 В топик: {'✅' if send_to_topic else '❌'}", 
-            callback_data=f"csv_totopic_{idx}"
-        )])
+        keyboard.append([InlineKeyboardButton(f"{_('csv_to_topic')} {'✅' if send_to_topic else '❌'}", callback_data=f"csv_totopic_{idx}")])
         
         if send_to_topic:
-            keyboard.append([InlineKeyboardButton("✏️ Сообщение в топик", callback_data=f"csv_topicmsg_{idx}")])
+            keyboard.append([InlineKeyboardButton(_("btn_edit_topic_msg"), callback_data=f"csv_topicmsg_{idx}")])
         
-        keyboard.append([InlineKeyboardButton("🗑 Удалить", callback_data=f"csv_del_{idx}")])
-        keyboard.append([InlineKeyboardButton("◀️ Назад", callback_data="csv_menu")])
+        keyboard.append([InlineKeyboardButton(_("btn_delete"), callback_data=f"csv_del_{idx}")])
+        keyboard.append([InlineKeyboardButton(_("btn_back"), callback_data="csv_menu")])
         
         await self.telegram_bot.edit_message(message_id, chat_id, text, keyboard)
     
     async def show_triggers_menu(self, chat_id: int, message_id: int):
         """Показать меню триггеров"""
         triggers = self.autoresponder.get_triggers()
-        
-        text = "📝 Триггеры автоответов\n\n"
-        
+        text = f"{_('triggers_title')}\n\n"
         keyboard = []
-        
         for i, trigger in enumerate(triggers):
             phrase = trigger.get('phrase', '')[:15]
             enabled = trigger.get('enabled', True)
             notify = trigger.get('notify_group', False)
             status = "✅" if enabled else "❌"
             notify_icon = "🔔" if notify else ""
-            
             text += f"{i+1}. {status}{notify_icon} \"{phrase}\"\n"
-            
-            # Кнопка для редактирования триггера
             keyboard.append([
                 InlineKeyboardButton(f"{status}{notify_icon} {phrase}", callback_data=f"auto_trigger_edit_{i}"),
-                InlineKeyboardButton("🗑", callback_data=f"auto_trigger_del_{i}")
+                InlineKeyboardButton(_("btn_delete"), callback_data=f"auto_trigger_del_{i}")
             ])
-        
         if not triggers:
-            text += "Пусто. Добавьте триггер."
+            text += _('triggers_empty')
         
-        keyboard.append([InlineKeyboardButton("➕ Добавить триггер", callback_data="auto_add_trigger")])
-        keyboard.append([InlineKeyboardButton("◀️ Назад", callback_data="auto_menu")])
-        
+        keyboard.append([InlineKeyboardButton(_("btn_add_trigger"), callback_data="auto_add_trigger")])
+        keyboard.append([InlineKeyboardButton(_("btn_back"), callback_data="auto_menu")])
         await self.telegram_bot.edit_message(message_id, chat_id, text, keyboard)
     
     async def show_trigger_edit_menu(self, chat_id: int, message_id: int, idx: int):
@@ -1357,37 +1293,27 @@ class BotService:
         notify_text = trigger.get('notify_text', '')
         exact_match = trigger.get('exact_match', False)
         
-        text = f"⚙️ Триггер #{idx+1}\n\n"
-        text += f"📝 Фраза: {phrase}\n"
-        text += f"💬 Ответ: {response[:50]}{'...' if len(response) > 50 else ''}\n"
-        text += f"Статус: {'✅ Вкл' if enabled else '❌ Выкл'}\n"
-        text += f"🎯 Режим: {'Точное совпадение' if exact_match else 'Вхождение в текст'}\n"
-        text += f"🔔 Уведомление: {'✅ Вкл' if notify else '❌ Выкл'}\n"
+        text = f"{_('trigger_edit_title')} #{idx+1}\n\n"
+        text += f"{_('trigger_phrase')} {phrase}\n"
+        text += f"{_('trigger_answer')} {response[:50]}{'...' if len(response) > 50 else ''}\n"
+        text += f"{_('auto_status')} {'✅' if enabled else '❌'}\n"
+        text += f"{_('trigger_mode')} {_('trigger_mode_exact') if exact_match else _('trigger_mode_contain')}\n"
+        text += f"{_('trigger_notify')} {'✅' if notify else '❌'}\n"
         if notify:
-            text += f"📢 Текст: {notify_text or '(по умолчанию)'}\n"
+            text += f"{_('trigger_notify_text')} {notify_text or '(по умолчанию)'}\n"
         
         keyboard = [
-            [InlineKeyboardButton(
-                f"{'🔴 Выключить' if enabled else '🟢 Включить'}", 
-                callback_data=f"auto_trigger_toggle_{idx}"
-            )],
-            [InlineKeyboardButton("✏️ Изменить фразу", callback_data=f"auto_trigger_phrase_{idx}")],
-            [InlineKeyboardButton("✏️ Изменить ответ", callback_data=f"auto_trigger_response_{idx}")],
-            [InlineKeyboardButton(
-                f"🎯 {'Точное' if exact_match else 'Вхождение'}", 
-                callback_data=f"auto_trigger_exact_{idx}"
-            )],
-            [InlineKeyboardButton(
-                f"🔔 Уведомление: {'✅' if notify else '❌'}", 
-                callback_data=f"auto_trigger_notify_{idx}"
-            )],
+            [InlineKeyboardButton(f"{_('btn_turn_off') if enabled else _('btn_turn_on')}", callback_data=f"auto_trigger_toggle_{idx}")],
+            [InlineKeyboardButton(_("btn_edit_phrase"), callback_data=f"auto_trigger_phrase_{idx}")],
+            [InlineKeyboardButton(_("btn_edit_answer"), callback_data=f"auto_trigger_response_{idx}")],
+            [InlineKeyboardButton(f"🎯 {_('trigger_mode_exact') if exact_match else _('trigger_mode_contain')}", callback_data=f"auto_trigger_exact_{idx}")],
+            [InlineKeyboardButton(f"{_('trigger_notify')} {'✅' if notify else '❌'}", callback_data=f"auto_trigger_notify_{idx}")],
         ]
-        
         if notify:
-            keyboard.append([InlineKeyboardButton("📢 Текст уведомления", callback_data=f"auto_trigger_notifytext_{idx}")])
+            keyboard.append([InlineKeyboardButton(_("btn_edit_notify_text"), callback_data=f"auto_trigger_notifytext_{idx}")])
         
-        keyboard.append([InlineKeyboardButton("🗑 Удалить", callback_data=f"auto_trigger_del_{idx}")])
-        keyboard.append([InlineKeyboardButton("◀️ Назад", callback_data="auto_triggers")])
+        keyboard.append([InlineKeyboardButton(_("btn_delete"), callback_data=f"auto_trigger_del_{idx}")])
+        keyboard.append([InlineKeyboardButton(_("btn_back"), callback_data="auto_triggers")])
         
         await self.telegram_bot.edit_message(message_id, chat_id, text, keyboard)
     
@@ -1399,29 +1325,20 @@ class BotService:
         good_text = self.autoresponder.get_good_review_text()
         bad_text = self.autoresponder.get_bad_review_text()
         
-        text = f"⭐ Автоответы на отзывы\n\n"
-        text += f"Статус: {'✅ Включено' if enabled else '❌ Выключено'}\n\n"
-        text += f"👍 На хорошие: {'✅' if good_enabled else '❌'}\n"
-        text += f"Текст: {good_text[:50]}{'...' if len(good_text) > 50 else ''}\n\n"
-        text += f"👎 На плохие: {'✅' if bad_enabled else '❌'}\n"
-        text += f"Текст: {bad_text[:50]}{'...' if len(bad_text) > 50 else ''}"
+        text = f"{_('reviews_title')}\n\n"
+        text += f"{_('auto_status')} {'✅' if enabled else '❌'}\n\n"
+        text += f"{_('reviews_good')} {'✅' if good_enabled else '❌'}\n"
+        text += f"{_('reviews_text')} {good_text[:50]}{'...' if len(good_text) > 50 else ''}\n\n"
+        text += f"{_('reviews_bad')} {'✅' if bad_enabled else '❌'}\n"
+        text += f"{_('reviews_text')} {bad_text[:50]}{'...' if len(bad_text) > 50 else ''}"
         
         keyboard = [
-            [InlineKeyboardButton(
-                f"{'🔴 Выключить' if enabled else '🟢 Включить'}", 
-                callback_data="auto_reviews_toggle"
-            )],
-            [InlineKeyboardButton(
-                f"👍 Хорошие: {'✅' if good_enabled else '❌'}", 
-                callback_data="auto_reviews_good_toggle"
-            )],
-            [InlineKeyboardButton("✏️ Текст для хороших", callback_data="auto_reviews_good_edit")],
-            [InlineKeyboardButton(
-                f"👎 Плохие: {'✅' if bad_enabled else '❌'}", 
-                callback_data="auto_reviews_bad_toggle"
-            )],
-            [InlineKeyboardButton("✏️ Текст для плохих", callback_data="auto_reviews_bad_edit")],
-            [InlineKeyboardButton("◀️ Назад", callback_data="auto_menu")]
+            [InlineKeyboardButton(f"{_('btn_turn_off') if enabled else _('btn_turn_on')}", callback_data="auto_reviews_toggle")],
+            [InlineKeyboardButton(f"{_('reviews_good')} {'✅' if good_enabled else '❌'}", callback_data="auto_reviews_good_toggle")],
+            [InlineKeyboardButton(_("btn_good_edit"), callback_data="auto_reviews_good_edit")],
+            [InlineKeyboardButton(f"{_('reviews_bad')} {'✅' if bad_enabled else '❌'}", callback_data="auto_reviews_bad_toggle")],
+            [InlineKeyboardButton(_("btn_bad_edit"), callback_data="auto_reviews_bad_edit")],
+            [InlineKeyboardButton(_("btn_back"), callback_data="auto_menu")]
         ]
         
         await self.telegram_bot.edit_message(message_id, chat_id, text, keyboard)

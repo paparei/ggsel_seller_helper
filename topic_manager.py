@@ -1,3 +1,5 @@
+import threading
+import copy
 import json
 import os
 import logging
@@ -20,12 +22,24 @@ class TopicManager:
         return {}
     
     def save_topics(self) -> None:
-        """Сохранение топиков в JSON файл"""
-        try:
-            with open(self.topics_file, 'w', encoding='utf-8') as f:
-                json.dump(self.topics, f, indent=2, ensure_ascii=False)
-        except Exception as e:
-            print(f"Ошибка сохранения топиков: {e}")
+        """Асинхронное и безопасное сохранение топиков в JSON"""
+        # 1. Снимаем "снимок" данных, чтобы они не изменились во время сохранения
+        data_snapshot = copy.deepcopy(self.topics)
+        
+        def _background_save():
+            try:
+                # 2. Пишем во временный файл (Atomic Write)
+                tmp_file = self.topics_file + ".tmp"
+                with open(tmp_file, 'w', encoding='utf-8') as f:
+                    json.dump(data_snapshot, f, indent=2, ensure_ascii=False)
+                
+                # 3. Мгновенно подменяем старый файл новым (Защита от повреждения)
+                os.replace(tmp_file, self.topics_file)
+            except Exception as e:
+                print(f"Ошибка сохранения топиков: {e}")
+                
+        # 4. Запускаем сохранение в фоновом потоке, чтобы не тормозить Telegram бота
+        threading.Thread(target=_background_save).start()
     
     def add_topic(self, chat_id: int, email: Optional[str], topic_id: int, topic_name: str) -> None:
         """Добавление нового топика"""

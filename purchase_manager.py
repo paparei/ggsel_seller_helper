@@ -1,5 +1,7 @@
 import json
 import os
+import threading
+import copy
 from typing import Dict, List, Optional
 from datetime import datetime
 from dataclasses import dataclass
@@ -39,12 +41,19 @@ class PurchaseManager:
         return {}
     
     def save_purchases(self) -> None:
-        """Сохранение обработанных покупок в JSON файл"""
-        try:
-            with open(self.purchases_file, 'w', encoding='utf-8') as f:
-                json.dump(self.processed_purchases, f, indent=2, ensure_ascii=False)
-        except Exception as e:
-            print(f"Ошибка сохранения покупок: {e}")
+        """Асинхронное и безопасное сохранение покупок в JSON"""
+        data_snapshot = copy.deepcopy(self.processed_purchases)
+        
+        def _background_save():
+            try:
+                tmp_file = self.purchases_file + ".tmp"
+                with open(tmp_file, 'w', encoding='utf-8') as f:
+                    json.dump(data_snapshot, f, indent=2, ensure_ascii=False)
+                os.replace(tmp_file, self.purchases_file)
+            except Exception as e:
+                print(f"Ошибка сохранения покупок: {e}")
+                
+        threading.Thread(target=_background_save).start()
     
     def parse_purchase_response(self, response_data: Dict, invoice_id: int) -> Optional[Purchase]:
         """Парсинг ответа API с информацией о покупке"""
