@@ -261,42 +261,88 @@ class BotService:
             logging.error(f"Error processing purchase {invoice_id}: {e}")
     
     async def create_topic_for_purchase(self, purchase: Purchase, skip_greeting: bool = False):
+        """Создание топика для покупки"""
         try:
-            if self.failed_topics.get(purchase.invoice_id) and datetime.now() - self.failed_topics.get(purchase.invoice_id) < timedelta(minutes=5): return
+            failed_time = self.failed_topics.get(purchase.invoice_id)
+            if failed_time and datetime.now() - failed_time < timedelta(minutes=5):
+                return
             
             if self.flood_control_until and datetime.now() < self.flood_control_until:
+                logging.info(f"Flood control, добавляем в очередь: {purchase.invoice_id}")
                 self.pending_topics.append({'purchase': purchase, 'timestamp': datetime.now(), 'skip_greeting': skip_greeting})
                 self._save_pending_topics()
                 return
             self.flood_control_until = None
             
             topic_key = f"purchase_{purchase.invoice_id}"
-            if self.topic_manager.get_all_topics().get(topic_key): return
+            if self.topic_manager.get_all_topics().get(topic_key):
+                return
             
             customer_id = purchase.buyer_email or purchase.buyer_account or f"Customer_{purchase.invoice_id}"
             topic_name = f"💬 {purchase.invoice_id} | {customer_id}"
-            await asyncio.sleep(2)
             
+            await asyncio.sleep(2)
             topic_id, cooldown = await self.telegram_bot.create_topic(topic_name)
             
             if topic_id is not None:
                 self.topic_manager.add_topic_for_purchase(purchase, topic_id, topic_name)
+                
                 date_str = ""
                 if purchase.purchase_date:
-                    try: date_str = datetime.fromisoformat(purchase.purchase_date.replace('+03:00', '')).strftime('%d.%m.%Y %H:%M')
-                    except: date_str = purchase.purchase_date
+                    try:
+                        dt = datetime.fromisoformat(purchase.purchase_date.replace('+03:00', ''))
+                        date_str = dt.strftime('%d.%m.%Y %H:%M')
+                    except:
+                        date_str = purchase.purchase_date
                 
-                msg = f"🛒 {'Topic restored' if skip_greeting else 'New purchase'}\n\n"
-                msg += f"🧾 Invoice: {purchase.invoice_id}\n📦 {purchase.name}\n💰 {purchase.amount} {purchase.currency_type}\n📧 {purchase.buyer_email or 'N/A'}\n"
-                if purchase.buyer_account: msg += f"👤 {purchase.buyer_account}\n"
-                if purchase.payment_method: msg += f"💳 {purchase.payment_method}\n"
-                if date_str: msg += f"📅 {date_str}\n"
+                # --- EXACT LAYOUT REPLICATION (NO DOUBLE EMOJIS) ---
+                order_link = f"https://seller.ggsel.net/orders/{purchase.invoice_id}"
+                header = _('noti_restored') if skip_greeting else _('noti_new_purchase')
                 
+                msg = f"{header}\n\n"
+                
+                safe_name = purchase.name.replace('<', '').replace('>', '').replace('&', '&amp;')
+                msg += f"{_('noti_product')} {safe_name}\n"
+                if getattr(purchase, 'item_id', 0): msg += f"{_('noti_item_id')} {purchase.item_id}\n"
+                msg += f"{_('noti_invoice')} <a href='{order_link}'>{purchase.invoice_id}</a>\n"
+                if date_str: msg += f"{_('noti_date')} {date_str}\n"
+                
+                # Prices Block
+                msg += f"\n💰 <b>{_('noti_prices')}</b>\n"
+                amt_rub = purchase.amount_rub if getattr(purchase, 'amount_rub', 0) > 0 else purchase.amount
+                amt_usd = purchase.amount_usd if getattr(purchase, 'amount_usd', 0) > 0 else round(purchase.amount / 90.0, 2)
+                msg += f"• RUB: {amt_rub}\n"
+                msg += f"• USD: {amt_usd}\n"
+                
+                # Details Block
+                state = purchase.invoice_state
+                # Force "In progress" status default since auto-complete is off
+                status_text = _('noti_status_processing') if state in (0, 1) else _('noti_status_done')
+                profit = purchase.profit if getattr(purchase, 'profit', 0) > 0 else purchase.amount
+                
+                msg += f"\n📊 <b>{_('noti_details')}</b>\n"
+                msg += f"{_('noti_total')} {purchase.amount} {purchase.currency_type}\n"
+                msg += f"{_('noti_status')} {status_text}\n"
+                msg += f"{_('noti_profit')} {profit}\n"
+                
+                # Buyer Info Block
+                msg += f"\n👤 <b>{_('noti_buyer_info')}</b>\n"
+                if purchase.payment_method: msg += f"{_('noti_payment')} {purchase.payment_method}\n"
+                if purchase.buyer_account: msg += f"{_('noti_account')} {purchase.buyer_account}\n"
+                if purchase.buyer_email: msg += f"{_('noti_email')} {purchase.buyer_email}\n"
+                if getattr(purchase, 'payment_aggregator', ''): msg += f"{_('noti_aggregator')} {purchase.payment_aggregator}\n"
+                
+                # Options Block
                 options_text, options_list = await self.get_purchase_options_with_list(purchase.invoice_id)
-                if options_text: msg += f"\n⚙️ Options:\n{options_text}\n"
+                if options_text: 
+                    safe_options = options_text.replace('<', '').replace('>', '').replace('&', '&amp;')
+                    msg += f"\n⚙️ <b>{_('noti_options')}</b>\n{safe_options}\n"
                 
-                await self.send_message_with_cooldown(msg, topic_id)
-                logging.info(f"Created topic {topic_id} for {purchase.invoice_id}")
+                from telegram import InlineKeyboardMarkup, InlineKeyboardButton
+                keyboard = InlineKeyboardMarkup([[InlineKeyboardButton(_("btn_go_to_order"), url=order_link)]])
+                
+                await self.send_message_with_cooldown(msg, topic_id, parse_mode="HTML", reply_markup=keyboard)
+                logging.info(f"Создан топик {topic_id} для {purchase.invoice_id}")
                 
                 if options_list and not skip_greeting:
                     await self.process_csv_rules(purchase.invoice_id, topic_id, options_list)
@@ -308,21 +354,19 @@ class BotService:
                         try:
                             await loop.run_in_executor(None, lambda cid=purchase.invoice_id, g=greeting: self.ggsel_api.send_message(cid, g))
                             await self.send_message_with_cooldown(f"📤 {greeting}", topic_id)
-                            logging.info(f"Greeting sent to chat {purchase.invoice_id}")
-                        except Exception as e: logging.error(f"Greeting error: {e}")
+                        except Exception as e:
+                            logging.error(f"Ошибка отправки приветствия: {e}")
                     
             elif cooldown:
                 self.flood_control_until = datetime.now() + timedelta(seconds=cooldown + 5)
                 self.pending_topics.append({'purchase': purchase, 'timestamp': datetime.now(), 'skip_greeting': skip_greeting})
                 self._save_pending_topics()
-                logging.warning(f"Flood control {cooldown}s, queued: {purchase.invoice_id}")
             else:
                 self.failed_topics[purchase.invoice_id] = datetime.now()
-                logging.error(f"Failed to create topic for {purchase.invoice_id}, retry in 5 min")
                 
         except Exception as e:
             self.failed_topics[purchase.invoice_id] = datetime.now()
-            logging.error(f"Topic creation error for {purchase.invoice_id}: {e}")
+            logging.error(f"Ошибка создания топика покупки {purchase.invoice_id}: {e}")
     
     async def load_chat_history(self, chat_ids: List[int], topic_id: int, force_reload: bool = False):
         try:
@@ -514,34 +558,49 @@ class BotService:
         await self.telegram_bot.stop()
         logging.info("Bot stopped")
     
-    async def send_message_with_cooldown(self, text: str, topic_id: int, chat_id: int = None, message_id: str = None) -> bool:
+    async def send_message_with_cooldown(self, text: str, topic_id: int, chat_id: int = None, message_id: str = None, parse_mode: str = None) -> bool:
+        """Отправка с учетом кулдауна и проверкой дублей"""
         try:
+            if chat_id and message_id:
+                key = f"{chat_id}_{message_id}"
+                if key in self.message_manager.processed_messages:
+                    msg_data = self.message_manager.processed_messages[key]
+                    if msg_data.get("sent_to_telegram", False):
+                        return True
+            
             if self.message_flood_control_until and datetime.now() < self.message_flood_control_until:
-                self.pending_messages.append({'text': text, 'topic_id': topic_id, 'chat_id': chat_id, 'message_id': message_id, 'timestamp': datetime.now()})
+                self.pending_messages.append({'text': text, 'topic_id': topic_id, 'chat_id': chat_id, 'message_id': message_id, 'timestamp': datetime.now(), 'parse_mode': parse_mode})
                 return False
             self.message_flood_control_until = None
             
-            success, cooldown = await self.telegram_bot.send_message(text, topic_id)
+            success, cooldown = await self.telegram_bot.send_message(text, topic_id, parse_mode=parse_mode)
+            
             if success:
-                if chat_id and message_id: self.message_manager.mark_message_sent(chat_id, message_id)
+                if chat_id and message_id:
+                    self.message_manager.mark_message_sent(chat_id, message_id)
+                    self.database.mark_message_sent(message_id)
                 return True
+                
             elif cooldown:
                 self.message_flood_control_until = datetime.now() + timedelta(seconds=cooldown + 5)
-                self.pending_messages.append({'text': text, 'topic_id': topic_id, 'chat_id': chat_id, 'message_id': message_id, 'timestamp': datetime.now()})
+                self.pending_messages.append({'text': text, 'topic_id': topic_id, 'chat_id': chat_id, 'message_id': message_id, 'timestamp': datetime.now(), 'parse_mode': parse_mode})
             return False
+                
         except Exception as e:
-            logging.error(f"Send error: {e}")
+            logging.error(f"Ошибка отправки: {e}")
             return False
-    
+
     async def process_pending_messages(self):
+        """Обработка отложенных сообщений"""
         if not self.pending_messages: return
         if self.message_flood_control_until and datetime.now() < self.message_flood_control_until: return
         self.message_flood_control_until = None
+        
         messages = self.pending_messages.copy()
         self.pending_messages.clear()
         
         for msg in messages:
-            success = await self.send_message_with_cooldown(msg['text'], msg['topic_id'], msg.get('chat_id'), msg.get('message_id'))
+            success = await self.send_message_with_cooldown(msg['text'], msg['topic_id'], msg.get('chat_id'), msg.get('message_id'), msg.get('parse_mode'))
             if not success and self.message_flood_control_until: break
             await asyncio.sleep(1)
     

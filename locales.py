@@ -56,6 +56,27 @@ class LocaleManager:
                     "📊 Предыдущий баланс: `{prev} {curr}`\n"
                     "🕒 Время проверки: `{time}`"
                 ),
+                # NEW NOTIFICATION KEYS (EMOJIS REMOVED TO PREVENT DOUBLING)
+                "noti_new_purchase": "🛒 <b>НОВЫЙ ЗАКАЗ!</b>",
+                "noti_restored": "🛒 <b>ВОССТАНОВЛЕН ТОПИК!</b>",
+                "noti_product": "📦 Товар:",
+                "noti_item_id": "🆔 ID товара:",
+                "noti_invoice": "🧾 Номер заказа:",
+                "noti_date": "📅 Дата заказа:",
+                "noti_prices": "Цены:",
+                "noti_details": "Детали заказа:",
+                "noti_total": "• Сумма:",
+                "noti_status": "• Состояние:",
+                "noti_profit": "• Прибыль продавца:",
+                "noti_buyer_info": "Информация о покупателе:",
+                "noti_payment": "• Способ оплаты:",
+                "noti_account": "• Аккаунт:",
+                "noti_email": "• Email:",
+                "noti_aggregator": "• Платёжный агрегатор:",
+                "noti_options": "Детали товара:",
+                "noti_status_processing": "⚙️ В процессе",
+                "noti_status_done": "✅ Выполнен",
+                "btn_go_to_order": "Перейти к заказу"
             },
             "en": {
                 "menu_title": "🤖 Bot Control Menu", "btn_auto": "⚙️ Auto-replies", "btn_stats": "📊 Statistics",
@@ -91,9 +112,6 @@ class LocaleManager:
                 "prompt_csv_user": "Current user message:\n{current}\n\n✏️ Enter message for the user:",
                 "prompt_csv_topic": "Current topic message:\n{current}\n\n✏️ Enter message for the topic:",
                 "prompt_csv_name": "Current option name:\n{current}\n\n✏️ Enter new name:",
-                "balance_btn": "💰 My Wallet",
-                "refresh_btn": "🔄 Refresh",
-                "balance_header": "🏛 **GGSel Seller Balance**\n" + "—" * 15,
                 "btn_balance": "💰 My Wallet",
                 "btn_refresh": "🔄 Refresh",
                 "balance_header": "🏛 **GGSel Seller Balance**\n" + "—" * 15,
@@ -110,6 +128,27 @@ class LocaleManager:
                     "📊 Previous balance: `{prev} {curr}`\n"
                     "🕒 Verification time: `{time}`"
                 ),
+                # NEW NOTIFICATION KEYS (EMOJIS REMOVED TO PREVENT DOUBLING)
+                "noti_new_purchase": "🛒 <b>NEW ORDER!</b>",
+                "noti_restored": "🛒 <b>TOPIC RESTORED!</b>",
+                "noti_product": "📦 Product:",
+                "noti_item_id": "🆔 Product ID:",
+                "noti_invoice": "🧾 Order number:",
+                "noti_date": "📅 Order date:",
+                "noti_prices": "Prices:",
+                "noti_details": "Order details:",
+                "noti_total": "• Total:",
+                "noti_status": "• Status:",
+                "noti_profit": "• Seller profit:",
+                "noti_buyer_info": "Buyer information:",
+                "noti_payment": "• Payment method:",
+                "noti_account": "• Account:",
+                "noti_email": "• Email:",
+                "noti_aggregator": "• Payment aggregator:",
+                "noti_options": "Product details:",
+                "noti_status_processing": "⚙️ In progress",
+                "noti_status_done": "✅ Completed",
+                "btn_go_to_order": "Go to order"
             }
         }
 
