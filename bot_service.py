@@ -26,6 +26,7 @@ class BotService:
         self.ggsel_api = GGSelAPI(config)
         self.telegram_bot = TelegramBot(config)
         self.last_available_balance = 0.0
+        self.usd_rub_rate = 79.14 # Default fallback rate
         
         # Managers now strictly use the SQLite Database - Zero JSON blocking!
         self.topic_manager = TopicManager(self.database)
@@ -131,7 +132,8 @@ class BotService:
             asyncio.create_task(self.monitor_messages()),
             asyncio.create_task(self.reauth_scheduler()),
             asyncio.create_task(self.purchase_checker()),
-            asyncio.create_task(self.balance_monitor_loop()) 
+            asyncio.create_task(self.balance_monitor_loop()), 
+            asyncio.create_task(self.update_exchange_rate_loop()) # <-- ADD THIS LINE
         ]
         
         try:
@@ -322,10 +324,19 @@ class BotService:
                 status_text = _('noti_status_processing') if state in (0, 1) else _('noti_status_done')
                 profit = purchase.profit if getattr(purchase, 'profit', 0) > 0 else purchase.amount
                 
+                # --- NEW: Calculate the estimated USD profit dynamically ---
+                if purchase.currency_type == 'RUB':
+                    profit_usd = round(profit / self.usd_rub_rate, 2)
+                    profit_str = f"{profit} RUB (~{profit_usd} USD)"
+                elif purchase.currency_type == 'USD':
+                    profit_str = f"{profit} USD"
+                else:
+                    profit_str = f"{profit} {purchase.currency_type}"
+                
                 msg += f"\n📊 <b>{_('noti_details')}</b>\n"
                 msg += f"{_('noti_total')} {purchase.amount} {purchase.currency_type}\n"
                 msg += f"{_('noti_status')} {status_text}\n"
-                msg += f"{_('noti_profit')} {profit}\n"
+                msg += f"{_('noti_profit')} {profit_str}\n"
                 
                 # Buyer Info Block
                 msg += f"\n👤 <b>{_('noti_buyer_info')}</b>\n"
@@ -639,7 +650,50 @@ class BotService:
         message_id = query.message.message_id
         
         if data == "auto_menu": await self.show_auto_menu(chat_id, message_id)
-        elif data == "check_balance": await self.show_balance(update, context)
+        elif data == "check_balance":
+            try:
+                # Answer immediately so the Telegram button loading spinner stops
+                await query.answer()
+                
+                if not await self.ensure_ggsel_auth():
+                    await self.telegram_bot.edit_message(query.message.message_id, query.message.chat.id, "❌ Auth Error", None)
+                    return
+
+                base_url = getattr(self.config, 'ggsel_base_url', 'https://seller.ggsel.net/api_sellers/api').rstrip('/')
+                url = f"{base_url}/sellers/account/balance/info?token={self.ggsel_api.token}"
+                
+                import httpx
+                # Reduced timeout to 5 seconds to prevent Telegram TimedOut error
+                async with httpx.AsyncClient(timeout=5.0) as client:
+                    response = await client.get(url, headers={'Accept': 'application/json'})
+                    response.raise_for_status()
+                    res_data = response.json()
+                
+                if res_data.get("retval") == 0:
+                    content = res_data.get("content", {})
+                    avail = float(content.get("amount_t_free") or 0.0)
+                    hold = float(content.get("amount_t_lock") or 0.0)
+                    total = avail + hold
+                    
+                    self.last_available_balance = avail
+                    
+                    balance_text = _("balance_header") + _("balance_body").format(
+                        total=f"{total:.2f}", avail=f"{avail:.2f}", hold=f"{hold:.2f}", curr="USD"
+                    )
+                else:
+                    balance_text = _("balance_error")
+
+                keyboard = [[InlineKeyboardButton(_("btn_back"), callback_data="auto_menu")]]
+                await self.telegram_bot.edit_message(query.message.message_id, query.message.chat.id, balance_text, keyboard)
+
+            except httpx.ReadTimeout:
+                logging.error("GGSel API Timeout on manual check")
+                keyboard = [[InlineKeyboardButton(_("btn_back"), callback_data="auto_menu")]]
+                await self.telegram_bot.edit_message(query.message.message_id, query.message.chat.id, "⏳ GGSel API took too long to respond. Try again.", keyboard)
+            except Exception as e:
+                logging.error(f"Manual balance check error: {e}")
+                keyboard = [[InlineKeyboardButton(_("btn_back"), callback_data="auto_menu")]]
+                await self.telegram_bot.edit_message(query.message.message_id, query.message.chat.id, "⚠️ Error connecting to GGSel. They might be temporarily down.", keyboard)
         elif data == "main_menu": await self.telegram_bot._handle_menu_command(update, context)
         elif data == "auto_toggle": self.autoresponder.toggle_enabled(); await self.show_auto_menu(chat_id, message_id)
         elif data == "auto_first_toggle": self.autoresponder.toggle_first_message(); await self.show_auto_menu(chat_id, message_id)
@@ -1156,51 +1210,79 @@ class BotService:
             await self.telegram_bot.edit_message(query.message.message_id, query.message.chat.id, _("balance_error"), self.get_main_menu_markup().inline_keyboard)
 
     async def balance_monitor_loop(self):
-        """Continuous background loop for checking balance releases"""
-        logging.info("Starting balance monitor loop...")
+        """Continuous background loop for checking balance changes (increases and decreases)"""
+        logging.info("Starting balance monitor loop (60s interval)...")
+        self.last_available_balance = None 
         
-        # Check every 10 minutes (600 seconds)
+        import httpx
+        
         while self.running:
-            await asyncio.sleep(600)
+            await asyncio.sleep(60) 
             try:
                 if not await self.ensure_ggsel_auth():
                     continue
                     
-                import json, urllib.request
                 base_url = getattr(self.config, 'ggsel_base_url', 'https://seller.ggsel.net/api_sellers/api').rstrip('/')
-                req = urllib.request.Request(f"{base_url}/sellers/account/balance/info?token={self.ggsel_api.token}")
-                req.add_header('Accept', 'application/json')
-                req.add_header('User-Agent', 'Mozilla/5.0')
+                url = f"{base_url}/sellers/account/balance/info?token={self.ggsel_api.token}"
                 
-                # Fetch balance asynchronously so it doesn't block the bot
-                loop = asyncio.get_event_loop()
-                response = await loop.run_in_executor(None, urllib.request.urlopen, req, 15)
-                content = json.loads(response.read().decode('utf-8')).get("content", {})
+                async with httpx.AsyncClient(timeout=15.0) as client:
+                    response = await client.get(url, headers={'Accept': 'application/json'})
+                    response.raise_for_status()
+                    res_data = response.json()
                     
+                content = res_data.get("content", {})
                 current_avail = float(content.get("amount_t_free") or 0.0)
                 current_hold = float(content.get("amount_t_lock") or 0.0)
                 current_total = current_avail + current_hold
                 
-                # If balance increased (funds released from hold)
-                if self.last_available_balance > 0 and current_avail > self.last_available_balance:
-                    released = current_avail - self.last_available_balance
-                    current_time = datetime.now().strftime("%d/%m/%Y %I:%M:%S %p")
+                if self.last_available_balance is None:
+                    self.last_available_balance = current_avail
+                    continue
+                
+                if current_avail != self.last_available_balance:
+                    diff = current_avail - self.last_available_balance
+                    current_time = datetime.now().strftime("%d.%m.%Y %H:%M:%S")
                     
-                    alert = _("balance_released_alert").format(
-                        amount=f"{released:.2f}", 
-                        curr="USD", 
-                        avail=f"{current_avail:.2f}",
-                        hold=f"{current_hold:.2f}",
-                        total=f"{current_total:.2f}",
-                        prev=f"{self.last_available_balance:.2f}",
-                        time=current_time
+                    if diff > 0:
+                        header = f"📈 **BALANCE INCREASE**\n🟢 **+{diff:.2f} USD**"
+                    else:
+                        header = f"📉 **BALANCE DECREASE**\n🔴 **{diff:.2f} USD**"
+                    
+                    alert = (
+                        f"{header}\n"
+                        f"💰 **Current balance:**\n"
+                        f"• Available: `{current_avail:.2f} USD`\n"
+                        f"• Blocked: `{current_hold:.2f} USD`\n"
+                        f"• Total: `{current_total:.2f} USD`\n"
+                        f"📊 Previous balance: `{self.last_available_balance:.2f} USD`\n"
+                        f"🕒 Time: `{current_time}`"
                     )
                     
-                    # Send alert to the main General topic (-1)
                     await self.telegram_bot.send_message(alert, -1, parse_mode="Markdown")
+                    self.last_available_balance = current_avail
                 
-                # Update tracker
-                self.last_available_balance = current_avail
+            except Exception:
+                # Silently pass connection drops so it doesn't spam the logs
+                pass
                 
+    async def update_exchange_rate_loop(self):
+        """Fetches the official CBR exchange rate every 12 hours"""
+        logging.info("Starting Exchange Rate updater...")
+        import httpx
+        while self.running:
+            try:
+                # Free public API for Russian Central Bank daily rates
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    resp = await client.get("https://www.cbr-xml-daily.ru/daily_json.js")
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        raw_cbr_rate = float(data['Valute']['USD']['Value'])
+                        
+                        # Add GGSel's ~1.3% hidden conversion markup
+                        self.usd_rub_rate = raw_cbr_rate * 1.013 
+                        logging.info(f"✅ USD/RUB Rate updated: {self.usd_rub_rate:.2f} (CBR: {raw_cbr_rate:.2f})")
             except Exception as e:
-                logging.debug(f"Balance Monitor Error: {e}")
+                logging.warning(f"⚠️ Failed to fetch exchange rate, using fallback: {e}")
+            
+            # Sleep for 12 hours before checking again
+            await asyncio.sleep(43200)

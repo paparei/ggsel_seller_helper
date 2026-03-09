@@ -42,6 +42,8 @@ def setup_logging():
     logging.getLogger('httpx').setLevel(logging.WARNING)
     logging.getLogger('telegram').setLevel(logging.WARNING)
     logging.getLogger('telegram.ext').setLevel(logging.WARNING)
+    # --- Add this line below to silence the GGSel connection drops ---
+    logging.getLogger('urllib3.connectionpool').setLevel(logging.ERROR)
 
 async def main():
     setup_logging()
