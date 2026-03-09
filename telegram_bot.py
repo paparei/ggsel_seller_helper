@@ -52,6 +52,21 @@ class TelegramBot:
             logging.error(f"Telegram init error: {e}")
             return False
 
+    async def send_message(self, text: str, topic_id: int, parse_mode: str = None, reply_markup = None) -> Tuple[bool, Optional[int]]:
+        """Accepts parse_mode and reply_markup for rich notifications"""
+        try:
+            if topic_id == -1: 
+                await self.bot.send_message(chat_id=self.group_id, text=text[:4000], parse_mode=parse_mode, reply_markup=reply_markup)
+            else: 
+                await self.bot.send_message(chat_id=self.group_id, message_thread_id=topic_id, text=text[:4000], parse_mode=parse_mode, reply_markup=reply_markup)
+            return True, None
+        except RetryAfter as e: 
+            return False, e.retry_after
+        except Exception as e:
+            logging.error(f"Telegram send error: {e}")
+            return False, 60
+
+    # ... keep the rest of the methods exactly as they are ...
     async def _handle_menu_command(self, update: Update, context):
         if update.effective_chat.id != self.group_id: return
         keyboard = [
@@ -95,14 +110,6 @@ class TelegramBot:
             return await self.edit_message(message_id, chat_id, text, keyboard)
         except Exception: return False
 
-    async def send_message(self, text: str, topic_id: int, parse_mode: str = None) -> Tuple[bool, Optional[int]]:
-        try:
-            if topic_id == -1: await self.bot.send_message(chat_id=self.group_id, text=text[:4000], parse_mode=parse_mode)
-            else: await self.bot.send_message(chat_id=self.group_id, message_thread_id=topic_id, text=text[:4000], parse_mode=parse_mode)
-            return True, None
-        except RetryAfter as e: return False, e.retry_after
-        except Exception: return False, 60
-
     async def create_topic(self, topic_name: str) -> Tuple[Optional[int], Optional[int]]:
         try:
             result = await self.bot.create_forum_topic(chat_id=self.group_id, name=topic_name[:120])
@@ -115,7 +122,6 @@ class TelegramBot:
             await self.bot.edit_forum_topic(chat_id=self.group_id, message_thread_id=topic_id, name=topic_name[:120])
             return True
         except Exception as e:
-            # 🛡️ Sửa lỗi Indentation ở đây:
             if any(err in str(e).lower() for err in ["deleted", "not found", "invalid"]):
                 return False
             return True
