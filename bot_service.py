@@ -558,40 +558,48 @@ class BotService:
         await self.telegram_bot.stop()
         logging.info("Bot stopped")
     
-    async def send_message_with_cooldown(self, text: str, topic_id: int, chat_id: int = None, message_id: str = None, parse_mode: str = None) -> bool:
-        """Отправка с учетом кулдауна и проверкой дублей"""
+    async def send_message_with_cooldown(self, text: str, topic_id: int, chat_id: int = None, message_id: str = None, parse_mode: str = None, reply_markup = None) -> bool:
+        """Updated to support reply_markup for clickable order buttons"""
         try:
+            # SQLite check instead of missing dictionary check
             if chat_id and message_id:
-                key = f"{chat_id}_{message_id}"
-                if key in self.message_manager.processed_messages:
-                    msg_data = self.message_manager.processed_messages[key]
-                    if msg_data.get("sent_to_telegram", False):
-                        return True
-            
+                if self.message_manager.is_message_processed(chat_id, message_id):
+                    # Check if it was already sent to TG in DB
+                    with __import__('sqlite3').connect(self.database.db_path) as conn:
+                        cur = conn.execute("SELECT is_sent_to_telegram FROM messages WHERE message_id = ?", (message_id,))
+                        row = cur.fetchone()
+                        if row and row[0]: return True
+
             if self.message_flood_control_until and datetime.now() < self.message_flood_control_until:
-                self.pending_messages.append({'text': text, 'topic_id': topic_id, 'chat_id': chat_id, 'message_id': message_id, 'timestamp': datetime.now(), 'parse_mode': parse_mode})
+                self.pending_messages.append({
+                    'text': text, 'topic_id': topic_id, 'chat_id': chat_id, 
+                    'message_id': message_id, 'timestamp': datetime.now(), 
+                    'parse_mode': parse_mode, 'reply_markup': reply_markup
+                })
                 return False
             self.message_flood_control_until = None
             
-            success, cooldown = await self.telegram_bot.send_message(text, topic_id, parse_mode=parse_mode)
+            success, cooldown = await self.telegram_bot.send_message(text, topic_id, parse_mode=parse_mode, reply_markup=reply_markup)
             
             if success:
                 if chat_id and message_id:
                     self.message_manager.mark_message_sent(chat_id, message_id)
-                    self.database.mark_message_sent(message_id)
                 return True
                 
             elif cooldown:
                 self.message_flood_control_until = datetime.now() + timedelta(seconds=cooldown + 5)
-                self.pending_messages.append({'text': text, 'topic_id': topic_id, 'chat_id': chat_id, 'message_id': message_id, 'timestamp': datetime.now(), 'parse_mode': parse_mode})
+                self.pending_messages.append({
+                    'text': text, 'topic_id': topic_id, 'chat_id': chat_id, 
+                    'message_id': message_id, 'timestamp': datetime.now(), 
+                    'parse_mode': parse_mode, 'reply_markup': reply_markup
+                })
             return False
                 
         except Exception as e:
-            logging.error(f"Ошибка отправки: {e}")
+            logging.error(f"Send error: {e}")
             return False
 
     async def process_pending_messages(self):
-        """Обработка отложенных сообщений"""
         if not self.pending_messages: return
         if self.message_flood_control_until and datetime.now() < self.message_flood_control_until: return
         self.message_flood_control_until = None
@@ -600,7 +608,10 @@ class BotService:
         self.pending_messages.clear()
         
         for msg in messages:
-            success = await self.send_message_with_cooldown(msg['text'], msg['topic_id'], msg.get('chat_id'), msg.get('message_id'), msg.get('parse_mode'))
+            success = await self.send_message_with_cooldown(
+                msg['text'], msg['topic_id'], msg.get('chat_id'), 
+                msg.get('message_id'), msg.get('parse_mode'), msg.get('reply_markup')
+            )
             if not success and self.message_flood_control_until: break
             await asyncio.sleep(1)
     
