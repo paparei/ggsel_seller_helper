@@ -126,10 +126,12 @@ class BotService:
         
         asyncio.create_task(self._background_boot_sequence())
         
+        # --- ADD THE BALANCE MONITOR TO THIS LIST ---
         tasks = [
             asyncio.create_task(self.monitor_messages()),
             asyncio.create_task(self.reauth_scheduler()),
-            asyncio.create_task(self.purchase_checker())
+            asyncio.create_task(self.purchase_checker()),
+            asyncio.create_task(self.balance_monitor_loop()) 
         ]
         
         try:
@@ -1153,22 +1155,52 @@ class BotService:
             logging.error(f"Balance error: {e}")
             await self.telegram_bot.edit_message(query.message.message_id, query.message.chat.id, _("balance_error"), self.get_main_menu_markup().inline_keyboard)
 
-    async def monitor_balance(self, context):
-        try:
-            import json, urllib.request
-            api = GGSelAPI(self.config)
-            if not api.login(): return
-            base_url = getattr(self.config, 'ggsel_base_url', 'https://seller.ggsel.net/api_sellers/api').rstrip('/')
-            req = urllib.request.Request(f"{base_url}/sellers/account/balance/info?token={api.token}")
-            req.add_header('Accept', 'application/json')
-            req.add_header('User-Agent', 'Mozilla/5.0')
-            
-            with urllib.request.urlopen(req, timeout=15) as response:
-                content = json.loads(response.read().decode('utf-8')).get("content", {})
+    async def balance_monitor_loop(self):
+        """Continuous background loop for checking balance releases"""
+        logging.info("Starting balance monitor loop...")
+        
+        # Check every 10 minutes (600 seconds)
+        while self.running:
+            await asyncio.sleep(600)
+            try:
+                if not await self.ensure_ggsel_auth():
+                    continue
+                    
+                import json, urllib.request
+                base_url = getattr(self.config, 'ggsel_base_url', 'https://seller.ggsel.net/api_sellers/api').rstrip('/')
+                req = urllib.request.Request(f"{base_url}/sellers/account/balance/info?token={self.ggsel_api.token}")
+                req.add_header('Accept', 'application/json')
+                req.add_header('User-Agent', 'Mozilla/5.0')
                 
-            avail, hold = float(content.get("amount_t_free") or 0.0), float(content.get("amount_t_lock") or 0.0)
-            if self.last_available_balance > 0 and avail > self.last_available_balance:
-                alert = _("balance_released_alert").format(amount=f"{avail - self.last_available_balance:.2f}", curr="USD", avail=f"{avail:.2f}", hold=f"{hold:.2f}", total=f"{avail+hold:.2f}", prev=f"{self.last_available_balance:.2f}", time=datetime.now().strftime("%d/%m/%Y %H:%M:%S"))
-                await context.bot.send_message(chat_id=self.config.telegram_group_id, text=alert, parse_mode="Markdown")
-            self.last_available_balance = avail
-        except Exception as e: logging.debug(f"Balance Monitor Error: {e}")
+                # Fetch balance asynchronously so it doesn't block the bot
+                loop = asyncio.get_event_loop()
+                response = await loop.run_in_executor(None, urllib.request.urlopen, req, 15)
+                content = json.loads(response.read().decode('utf-8')).get("content", {})
+                    
+                current_avail = float(content.get("amount_t_free") or 0.0)
+                current_hold = float(content.get("amount_t_lock") or 0.0)
+                current_total = current_avail + current_hold
+                
+                # If balance increased (funds released from hold)
+                if self.last_available_balance > 0 and current_avail > self.last_available_balance:
+                    released = current_avail - self.last_available_balance
+                    current_time = datetime.now().strftime("%d/%m/%Y %I:%M:%S %p")
+                    
+                    alert = _("balance_released_alert").format(
+                        amount=f"{released:.2f}", 
+                        curr="USD", 
+                        avail=f"{current_avail:.2f}",
+                        hold=f"{current_hold:.2f}",
+                        total=f"{current_total:.2f}",
+                        prev=f"{self.last_available_balance:.2f}",
+                        time=current_time
+                    )
+                    
+                    # Send alert to the main General topic (-1)
+                    await self.telegram_bot.send_message(alert, -1, parse_mode="Markdown")
+                
+                # Update tracker
+                self.last_available_balance = current_avail
+                
+            except Exception as e:
+                logging.debug(f"Balance Monitor Error: {e}")
